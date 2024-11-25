@@ -64,7 +64,8 @@ def create_lmdb(input_data_path, output_lmdb_path, output_parquet_path):
                     file_without_tif = os.path.splitext(file)[0]
                     patch_id = file_without_tif.rsplit('_', 1)[0]
 
-                    # Get split value from parquet
+                    # Get the row corresponding to patch_id 
+                    
                     split_values = df_parquet.loc[df_parquet['patch_id'].str.startswith(patch_id), 'split'].values
                     if len(split_values) == 0:
                         print(f"Warning: No split info for {patch_id}")
@@ -75,7 +76,9 @@ def create_lmdb(input_data_path, output_lmdb_path, output_parquet_path):
                     # Open the .tif file and extract data and metadata
                     with rasterio.open(sub_sub_path) as src:
                         data = src.read()
-                        metadata = src.meta
+                        metadata_row = df_parquet.loc[df_parquet['patch_id'].str.startswith(patch_id)]
+                        metadata = metadata_row.iloc[0].to_dict()
+                        
 
                     if split_value in stats:
                         stats[split_value] += 1
@@ -138,7 +141,7 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
     
     stats = {"train": 0, "validation": 0, "test": 0}
    
-    #create_parquet(input_data_path,output_parquet_path)
+    create_parquet(input_data_path,output_parquet_path)
     # Load the metadata from the Parquet file
     
     # Make sure the output paths exist
