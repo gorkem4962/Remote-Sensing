@@ -15,7 +15,7 @@ import train
 # on the server. For auto-tests, the _REF keys will be used to compare the results. For local tests, just set the
 # non-_REF keys and _REF keys to the same values.
 
-os.environ['EUROSAT_SRC'] = "/home/name/Downloads/EuroSAT_MS/"
+os.environ['EUROSAT_SRC'] = "untracked-files/EuroSAT_MS/"
 os.environ['EUROSAT_LMDB'] = "untracked-files/EuroSAT.lmdb"
 os.environ['EUROSAT_LMDB_REF'] = "untracked-files/EuroSAT.lmdb"  # GT, same as EUROSAT_LMDB
 os.environ['EUROSAT_PARQUET'] = "untracked-files/EuroSAT.parquet"
@@ -35,12 +35,12 @@ os.environ['RANDOM_SEED'] = "42"
 # ================================================================================================================== #
 
 if __name__ == '__main__':
-    test_conversion_ben = True
+    test_conversion_ben = False
     test_conversion_eurosat = True
-    test_data_ben = True
-    test_data_eurosat = True
-    test_training_ben = True
-    test_training_eurosat = True
+    test_data_ben = False
+    test_data_eurosat = False
+    test_training_ben = False
+    test_training_eurosat = False
     # You may run your code here
 
     # ============================================== Don't change this ============================================== #

@@ -90,7 +90,7 @@ def create_lmdb(input_data_path, output_lmdb_path, output_parquet_path):
 
                 
 
-                    # Commit every 1000 files
+                   
                 
         # Commit remaining data after the loop
         
@@ -136,6 +136,7 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
     :param output_parquet_path: Path to the destination Parquet file
     :return: None
     """
+    delete_directory(output_parquet_path)
     delete_directory(output_lmdb_path)
     
     
