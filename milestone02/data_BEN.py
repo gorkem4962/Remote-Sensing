@@ -7,6 +7,16 @@ from lightning.pytorch import LightningDataModule
 from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 
+from pathlib import Path
+import os
+import lmdb
+import pandas as pd
+import numpy as np
+import pickle
+import rasterio
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
 
 # additional imports
 
@@ -55,24 +65,97 @@ class BENIndexableLMDBDataset(Dataset):
         """
         # TODO: Implement the constructor for the dataset.
         # Hint: Be aware when to initialize what.
-        pass
+        self.lmdb_path = lmdb_path
+        self.metadata_parquet_path = metadata_parquet_path
+        self.bandorder = bandorder
+        self.split = split
+        self.transform = transform
+        # Load metadata
+        metadata_temp =  pd.read_parquet(self.metadata_parquet_path)
+        if self.split is None: 
+            self.metadata = metadata_temp
+        else: 
+            self.metadata = metadata_temp.loc[metadata_temp['split'].isin([self.split])]
+
+
+        # Open LMDB environment
+        self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+       
+        # Map band names to indices
+       
+        
+        
 
     def __len__(self):
         # TODO: Implement the length of the dataset.
-        return ...
+
+        return len(self.metadata)
+
+
 
     def __getitem__(self, idx):
         """
         Get an item from the dataset.
 
-        :param idx: index of the item to get
-        :return: (patch, label) tuple where patch is a tensor of shape (C, H, W) and label is a tensor of shape (N,)
+        :param idx: Index of the item in the dataset.
+        :return: (patch, label) tuple where patch is a tensor of shape (C, H, W) and label is a tensor of shape (N,).
         """
-        # TODO: Implement the __getitem__ method for the dataset.
-        return ...
+        
+       
+        if idx >= len(self.metadata) or idx < 0:
+         raise IndexError(f"Index {idx} is out of bounds for metadata of size {len(metadata)}")
+
+        sample = self.metadata.iloc[idx]
+        band_tensors = []  # To hold transformed tensors of each band
+        label_list = []
+        # Target shape for resizing (e.g., 120x120 for consistency)
+        target_height, target_width = 120, 120
+
+        patch_id = sample['patch_id']
+
+        # Retrieve the band data from the LMDB database
+        with self.env.begin() as txn:
+            data = txn.get(patch_id.encode('utf-8'))
+            if data is None:
+                raise KeyError(f"Sample ID: {patch_id} not found in LMDB.")
+            
+            dictonary = pickle.loads(data)
+            
+            for band in self.bandorder:
+                band_image = dictonary[band]  # Assuming `band` retrieves the correct image data
+                label = sample['labels']
+                
+                # Convert band image to tensor
+                band_image_tensor = torch.tensor(band_image, dtype=torch.float32).unsqueeze(0)  # Add channel dimension
+                
+                # Resize using torch.nn.functional.interpolate
+                band_image_resized = F.interpolate(
+                    band_image_tensor, 
+                    size=(target_height, target_width), 
+                    mode='nearest'
+                ).squeeze(0)  # Remove added channel dimension
+                
+                # Append resized band tensor and label
+                band_tensors.append(band_image_resized)
+                label_list.append(label)
+
+        # Concatenate all bands along the channel dimension (C, H, W)
+        image = torch.cat(band_tensors, dim=0)
+        
+        # Convert labels to indices
+        labels_indices = [BEN_CLASSES.index(arr[0]) for arr in label_list]
+        labels = torch.tensor(labels_indices)
+
+        return image, labels
+
+        
 
 
 class BENIndexableTifDataset(Dataset):
+     
+    
+
+
     def __init__(self, base_path: str, bandorder: List, split=None, transform=None):
         """
         Dataset for the BigEarthNet dataset using tif files.
@@ -84,10 +167,37 @@ class BENIndexableTifDataset(Dataset):
         """
         # TODO: Implement the constructor for the dataset.
         # Hint: Be aware when to initialize what.
+        self.base_path = base_path
+        self.bandorder = bandorder
+        self.split = split 
+        self.transform = transform 
+
+        dataframe = pd.read_parquet("untracked-files/BigEarthNet.parquet")
+        if self.split is None:
+           self.metadata_for_split = dataframe
+        else: 
+           self.metadata_for_split = dataframe.loc[dataframe['split'].isin([self.split])]
+        # Reset the indices
+        self.metadata_for_split.reset_index(drop=True, inplace=True)
+
+# Verify the new indices
+
+
+    
+
 
     def __len__(self):
         # TODO: Implement the length of the dataset.
-        return ...
+
+        input_data_path = self.base_path
+        path_to_DataSet = Path(os.path.join(input_data_path, "BigEarthNet-Lithuania-Summer-S2"))
+        counter = 0
+        for sub_path in path_to_DataSet.iterdir():
+            for sub_path_order in sub_path.iterdir():
+                # for sub_sub_path in sub_path_order.iterdir():
+                    counter +=1
+                     
+        return counter
 
     def __getitem__(self, idx):
         """
@@ -96,8 +206,73 @@ class BENIndexableTifDataset(Dataset):
         :param idx: index of the item to get
         :return: (patch, label) tuple where patch is a tensor of shape (C, H, W) and label is a tensor of shape (N,)
         """
+        
         # TODO: Implement the __getitem__ method for the dataset.
-        return ...
+        
+        band_tensors = []  # To hold transformed tensors of each band
+        label_list = []
+         # Target shape for resizing (e.g., 120x120 for consistency)
+        target_height, target_width = 120, 120
+        input_data_path = self.base_path
+        path_to_DataSet = os.path.join(input_data_path, "BigEarthNet-Lithuania-Summer-S2")
+        
+        patch_id = self.metadata_for_split.iloc[idx]['patch_id']
+    
+       
+        tile = patch_id.rsplit('_', 2)[0]
+        path_to_tile = os.path.join(path_to_DataSet,tile)
+        path_to_patch_2 = os.path.join(path_to_tile,patch_id)
+        path_to_patch = os.path.join(path_to_patch_2,patch_id)
+        for band in self.bandorder:
+            
+            path_to_band = path_to_patch+ f"_{band}.tif"
+
+         # Retrieve the band data from the LMDB database
+            with rasterio.open(path_to_band) as txn:
+             data = txn.read()
+             if data is None:
+                raise KeyError("Sample ID: not found in tif files.")
+             
+            # Unpack the stored record
+          
+            band_image = data  # NumPy array
+            label = self.metadata_for_split.iloc[idx]['labels']
+            
+
+         # Resize the band image using NumPy or manual interpolation
+            if band_image.shape[1:] != (target_height, target_width):
+            # Convert NumPy array to PyTorch tensor and add a batch dimension
+             band_image_tensor = torch.tensor(band_image, dtype=torch.float32).unsqueeze(0)  # Add batch dimension
+
+            # Resize using interpolate
+             band_image_resized = F.interpolate(
+                band_image_tensor, 
+                size=(target_height, target_width), 
+                mode='nearest'
+             ).squeeze(0).numpy()  # Remove batch dimension and convert back to NumPy
+            else:
+             band_image_resized = band_image
+
+        # Convert to tensor
+            band_tensor = torch.tensor(band_image_resized, dtype=torch.float32)
+            label_list.append(label)
+        
+
+        # Append the tensor to the list
+            band_tensors.append(band_tensor)
+
+    # Concatenate all bands along the channel dimension (C, H, W)
+        image = torch.cat(band_tensors, dim=0)
+        labels_indices =  [BEN_CLASSES.index(arr[0]) for arr in label_list]
+        labels = torch.tensor(labels_indices)
+    # Retrieve label from metadata
+     
+
+        return image, labels
+      
+
+              
+        
 
 
 class BENIterableLMDBDataset(IterableDataset):
@@ -114,21 +289,84 @@ class BENIterableLMDBDataset(IterableDataset):
         """
         # TODO: Implement the constructor for the dataset.
         # Hint: Be aware when to initialize what.
-        pass
+        self.lmdb_path = lmdb_path
+        self.transform = transform
+        self.with_keys = with_keys
+        self.bandorder = bandorder
+        self.split = split 
+        # Load and filter metadata
+        self.metadata = pd.read_parquet(metadata_parquet_path)
+       
+        
+        # Open the LMDB environment
+        self.env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+        
 
     def __len__(self):
         # TODO: Implement the length of the dataset.
-        return ...
+        
+        return len(self.metadata)
+
+
 
     def __iter__(self):
         """
         Iterate over the dataset.
 
-        :return: an iterator over the dataset, e.g. via `yield` where each item is a (patch, label) tuple where patch is
-            a tensor of shape (C, H, W) and label is a tensor of shape (N,)
+        :return: an iterator over the dataset, yielding (patch, label) tuples where patch is a tensor of shape (C, H, W)
+                and label is a tensor of shape (N,). If `self.with_keys` is True, yields (sample_id, patch, label).
         """
-        # TODO: Implement the iterator for the dataset.
-        return ...
+        if self.split is None:
+            metadata = self.metadata
+        else:
+            metadata = self.metadata.loc[self.metadata['split'].isin([self.split])]
+
+        for idx in range(len(metadata)):
+            sample = metadata.iloc[idx]
+            band_tensors = []  # To hold transformed tensors of each band
+            label_list = []
+            target_height, target_width = 120, 120  # Target shape for resizing
+
+            patch_id = sample['patch_id']
+
+            # Retrieve the band data from the LMDB database
+            with self.env.begin() as txn:
+                data = txn.get(patch_id.encode('utf-8'))
+                if data is None:
+                    raise KeyError(f"Sample ID: {patch_id} not found in LMDB.")
+                
+                dictonary = pickle.loads(data)
+                
+                for band in self.bandorder:
+                    band_image = dictonary[band]  # Assuming `band` retrieves the correct image data
+                    label = sample['labels']
+                    
+                    # Convert band image to tensor
+                    band_image_tensor = torch.tensor(band_image, dtype=torch.float32).unsqueeze(0)  # Add channel dimension
+                    
+                    # Resize using torch.nn.functional.interpolate
+                    band_image_resized = F.interpolate(
+                        band_image_tensor, 
+                        size=(target_height, target_width), 
+                        mode='nearest'
+                    ).squeeze(0)  # Remove added channel dimension
+                    
+                    # Append resized band tensor and label
+                    band_tensors.append(band_image_resized)
+                    label_list.append(label)
+
+            # Concatenate all bands along the channel dimension (C, H, W)
+            image = torch.cat(band_tensors, dim=0)
+            
+            # Convert labels to indices
+            labels_indices = [BEN_CLASSES.index(arr[0]) for arr in label_list]
+            labels = torch.tensor(labels_indices)
+
+            if self.with_keys:
+                yield patch_id, image, labels
+            else:
+                yield image, labels
+    
 
 
 class BENDataModule(LightningDataModule):
@@ -155,23 +393,109 @@ class BENDataModule(LightningDataModule):
         """
         super().__init__()
         # TODO: Store the parameters as attributes as needed.
-        pass
+
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.bandorder = bandorder
+        self.ds_type = ds_type
+        self.base_path = base_path
+        self.lmdb_path = lmdb_path
+        self.metadata_parquet_path = metadata_parquet_path
+
+        # Initialize the dataset objects for train, validation, and test (None to be initialized later)
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
 
     def setup(self, stage=None):
+        
         # TODO: Create dataset objects for the train, validation and test splits.
-        pass
+        if self.ds_type == 'indexable_lmdb':
+            # Use BENIndexableLMDBDataset
+            self.train_dataset = BENIndexableLMDBDataset(
+                lmdb_path=self.lmdb_path,
+                metadata_parquet_path=self.metadata_parquet_path,
+                bandorder=self.bandorder,
+                split='train'
+            )
+            self.val_dataset = BENIndexableLMDBDataset(
+                lmdb_path=self.lmdb_path,
+                metadata_parquet_path=self.metadata_parquet_path,
+                bandorder=self.bandorder,
+                split='validation'
+            )
+            self.test_dataset = BENIndexableLMDBDataset(
+                lmdb_path=self.lmdb_path,
+                metadata_parquet_path=self.metadata_parquet_path,
+                bandorder=self.bandorder,
+                split='test'
+            )
+
+        elif self.ds_type == 'indexable_tif':
+            # Use BENIndexableTifDataset
+            self.train_dataset = BENIndexableTifDataset(
+                base_path=self.base_path,
+                bandorder=self.bandorder,
+                split = 'train'
+            )
+            self.val_dataset = BENIndexableTifDataset(
+                base_path=self.base_path,
+                bandorder=self.bandorder,
+                split='validation'
+            )
+            self.test_dataset = BENIndexableTifDataset(
+                base_path=self.base_path,
+                bandorder=self.bandorder,
+                split='test'
+            )
+
+        elif self.ds_type == 'iterable_lmdb':
+            # Use BENIterableLMDBDataset
+            self.train_dataset = BENIterableLMDBDataset(
+                lmdb_path=self.lmdb_path,
+                metadata_parquet_path=self.metadata_parquet_path,
+                bandorder=self.bandorder,
+                split='train'
+            )
+            self.val_dataset = BENIterableLMDBDataset(
+                lmdb_path=self.lmdb_path,
+                metadata_parquet_path=self.metadata_parquet_path,
+                bandorder=self.bandorder,
+                split='validation'
+            )
+            self.test_dataset = BENIterableLMDBDataset(
+                lmdb_path=self.lmdb_path,
+                metadata_parquet_path=self.metadata_parquet_path,
+                bandorder=self.bandorder,
+                split='test'
+            )
 
     def train_dataloader(self):
         # TODO: Return a DataLoader for the training dataset with the correct parameters for training neural networks.
-        return ...
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False
+        )
 
     def val_dataloader(self):
         # TODO: Return a DataLoader for the validation dataset with the correct parameters for training neural networks.
-        return ...
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False  # Validation data should not be shuffled
+        )
 
     def test_dataloader(self):
         # TODO: Return a DataLoader for the test dataset with the correct parameters for training neural networks.
-        return ...
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False  # Validation data should not be shuffled
+        )
 
 
 ############################################ DON'T CHANGE CODE BELOW HERE ############################################
@@ -201,7 +525,6 @@ def main(
     :return: None
     """
     import time
-
     # check values of sample_indices
     for split in ['train', 'validation', 'test', None]:
         print(f"\nSplit: {split}")
@@ -241,8 +564,10 @@ def main(
             print(f"{split}-{ds_type}: {_hash(total_str)} @ {time.time() - t0:.2f}s")
 
     print()
+   
     for ds_type in ['indexable_lmdb', 'indexable_tif', 'iterable_lmdb']:
         # seed the dataloaders for reproducibility
+        
         torch.manual_seed(seed)
         dm = BENDataModule(
             batch_size=1,
@@ -254,12 +579,16 @@ def main(
             base_path=tif_base_path
         )
         dm.setup()
-        # again, collect hashes
+        
         total_str = ""
+        
         for i in range(num_batches):
+            
+            
             for x, y in dm.train_dataloader():
                 total_str += _hash(x) + _hash(y)
                 break
+            
             for x, y in dm.val_dataloader():
                 total_str += _hash(x) + _hash(y)
                 break

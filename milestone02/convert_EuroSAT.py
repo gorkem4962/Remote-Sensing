@@ -7,6 +7,7 @@ import lmdb
 import pickle
 from tqdm import tqdm
 import shutil
+
 def read_lmdb(lmdb_path):
     """
     Open an LMDB file and print some of its contents.
@@ -53,6 +54,9 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
     :return: None
     """
     
+    stats = {"train": 0, "validation": 0, "test": 0}
+    metadata = []
+    
     delete_directory(output_lmdb_path)
     delete_directory(output_parquet_path)
 
@@ -64,10 +68,10 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
     env = lmdb.open(output_lmdb_path, map_size=int(20**10), lock=True)
     
     # Initialize the DataFrame to hold metadata
-    metadata = []
+   
 
     # Prepare stats to count splits
-    stats = {"train": 0, "validation": 0, "test": 0}
+    
     
     # Traverse through each class folder (e.g., AnnualCrop, Forest, etc.)
     for class_folder in os.listdir(input_data_path):
@@ -79,7 +83,7 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
 
        
        
-
+        
         # List all .tif files in this class directory
         tif_files = sorted(class_path.glob("*.tif"), key=lambda f: int(f.stem.split('_')[-1]))
         
@@ -110,7 +114,7 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
 
                 # Serialize and store in LMDB
                 key = file.name.encode('utf-8')
-                value = pickle.dumps({"data": data, "metadata": src.meta})
+                value = pickle.dumps({"data": data})
                 txn.put(key, value)
                 
                 # Append metadata for parquet
@@ -124,16 +128,17 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
 
     # Write the metadata to a Parquet file
     df.to_parquet(output_parquet_path)
-
+    
     # Print dataset statistics
     num_keys = len(metadata)
     num_train_samples = stats["train"]
     num_validation_samples = stats["validation"]
     num_test_samples = stats["test"]
-
+    
     print(f"#samples: {num_keys}")
     print(f"#samples_train: {num_train_samples}")
     print(f"#samples_validation: {num_validation_samples}")
     print(f"#samples_test: {num_test_samples}") 
-
+    
+    
     
