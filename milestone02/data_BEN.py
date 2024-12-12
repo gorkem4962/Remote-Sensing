@@ -1,4 +1,5 @@
 # partial functions
+
 from hashlib import md5
 from typing import List, Literal, Optional
 
@@ -16,6 +17,9 @@ import pickle
 import rasterio
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, SubsetRandomSampler
+import random
+from torch.utils.data import Sampler
 
 
 # additional imports
@@ -143,7 +147,9 @@ class BENIndexableLMDBDataset(Dataset):
         image = torch.cat(band_tensors, dim=0)
         
         # Convert labels to indices
-        labels_indices = [BEN_CLASSES.index(arr[0]) for arr in label_list]
+
+        labels_indices = [BEN_CLASSES.index(item) for arr in label_list for item in arr]
+        
         labels = torch.tensor(labels_indices)
 
         return image, labels
@@ -171,8 +177,9 @@ class BENIndexableTifDataset(Dataset):
         self.bandorder = bandorder
         self.split = split 
         self.transform = transform 
-
+        
         dataframe = pd.read_parquet("untracked-files/BigEarthNet.parquet")
+        self.metadata = dataframe 
         if self.split is None:
            self.metadata_for_split = dataframe
         else: 
@@ -188,15 +195,8 @@ class BENIndexableTifDataset(Dataset):
 
     def __len__(self):
         # TODO: Implement the length of the dataset.
-
-        input_data_path = self.base_path
-        path_to_DataSet = Path(os.path.join(input_data_path, "BigEarthNet-Lithuania-Summer-S2"))
-        counter = 0
-        for sub_path in path_to_DataSet.iterdir():
-            for sub_path_order in sub_path.iterdir():
-                # for sub_sub_path in sub_path_order.iterdir():
-                    counter +=1
-                     
+        counter = len(self.metadata_for_split)
+       
         return counter
 
     def __getitem__(self, idx):
@@ -206,6 +206,8 @@ class BENIndexableTifDataset(Dataset):
         :param idx: index of the item to get
         :return: (patch, label) tuple where patch is a tensor of shape (C, H, W) and label is a tensor of shape (N,)
         """
+        if idx < 0 or idx >= len(self.metadata_for_split):
+         raise IndexError(f"Index {idx} out of bounds for dataset of size {len(self.metadata_for_split)}")
         
         # TODO: Implement the __getitem__ method for the dataset.
         
@@ -217,7 +219,8 @@ class BENIndexableTifDataset(Dataset):
         path_to_DataSet = os.path.join(input_data_path, "BigEarthNet-Lithuania-Summer-S2")
         
         patch_id = self.metadata_for_split.iloc[idx]['patch_id']
-    
+        sample = self.metadata_for_split.iloc[idx]['labels']
+       
        
         tile = patch_id.rsplit('_', 2)[0]
         path_to_tile = os.path.join(path_to_DataSet,tile)
@@ -263,7 +266,8 @@ class BENIndexableTifDataset(Dataset):
 
     # Concatenate all bands along the channel dimension (C, H, W)
         image = torch.cat(band_tensors, dim=0)
-        labels_indices =  [BEN_CLASSES.index(arr[0]) for arr in label_list]
+        
+        labels_indices =  [BEN_CLASSES.index(item) for arr in label_list for item in arr]
         labels = torch.tensor(labels_indices)
     # Retrieve label from metadata
      
@@ -295,12 +299,16 @@ class BENIterableLMDBDataset(IterableDataset):
         self.bandorder = bandorder
         self.split = split 
         # Load and filter metadata
-        self.metadata = pd.read_parquet(metadata_parquet_path)
+        metadata_2 = pd.read_parquet(metadata_parquet_path)
+        if self.split is None:
+            self.metadata = metadata_2
+        else:
+            self.metadata = metadata_2.loc[metadata_2['split'].isin([self.split])]
        
         
         # Open the LMDB environment
         self.env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
-        
+        self.current_index = 0
 
     def __len__(self):
         # TODO: Implement the length of the dataset.
@@ -316,13 +324,13 @@ class BENIterableLMDBDataset(IterableDataset):
         :return: an iterator over the dataset, yielding (patch, label) tuples where patch is a tensor of shape (C, H, W)
                 and label is a tensor of shape (N,). If `self.with_keys` is True, yields (sample_id, patch, label).
         """
-        if self.split is None:
-            metadata = self.metadata
-        else:
-            metadata = self.metadata.loc[self.metadata['split'].isin([self.split])]
-
-        for idx in range(len(metadata)):
-            sample = metadata.iloc[idx]
+        
+        
+        while self.current_index < len(self.metadata):
+            idx = self.current_index
+            self.current_index += 1
+            sample = self.metadata.iloc[idx]
+            #print(f"Sample {idx}, Label: {sample['labels']}")
             band_tensors = []  # To hold transformed tensors of each band
             label_list = []
             target_height, target_width = 120, 120  # Target shape for resizing
@@ -359,7 +367,7 @@ class BENIterableLMDBDataset(IterableDataset):
             image = torch.cat(band_tensors, dim=0)
             
             # Convert labels to indices
-            labels_indices = [BEN_CLASSES.index(arr[0]) for arr in label_list]
+            labels_indices = [BEN_CLASSES.index(item) for arr in label_list for item in arr]
             labels = torch.tensor(labels_indices)
 
             if self.with_keys:
@@ -370,6 +378,7 @@ class BENIterableLMDBDataset(IterableDataset):
 
 
 class BENDataModule(LightningDataModule):
+
     def __init__(
             self,
             batch_size: int,
@@ -406,9 +415,9 @@ class BENDataModule(LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
-
-    def setup(self, stage=None):
         
+    
+    def setup(self, stage=None):
         # TODO: Create dataset objects for the train, validation and test splits.
         if self.ds_type == 'indexable_lmdb':
             # Use BENIndexableLMDBDataset
@@ -469,16 +478,19 @@ class BENDataModule(LightningDataModule):
                 bandorder=self.bandorder,
                 split='test'
             )
-
+    
+   
     def train_dataloader(self):
-        # TODO: Return a DataLoader for the training dataset with the correct parameters for training neural networks.
+                
+    # Create a sampler that respects the dataset length
+        
+        
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False
+            # Use the custom sampler
         )
-
     def val_dataloader(self):
         # TODO: Return a DataLoader for the validation dataset with the correct parameters for training neural networks.
         return DataLoader(
@@ -525,6 +537,7 @@ def main(
     :return: None
     """
     import time
+    
     # check values of sample_indices
     for split in ['train', 'validation', 'test', None]:
         print(f"\nSplit: {split}")
@@ -562,7 +575,7 @@ def main(
                 else "IndexableTif " if DS == BENIndexableTifDataset \
                 else "IndexableLMDB"
             print(f"{split}-{ds_type}: {_hash(total_str)} @ {time.time() - t0:.2f}s")
-
+    
     print()
    
     for ds_type in ['indexable_lmdb', 'indexable_tif', 'iterable_lmdb']:
@@ -579,20 +592,28 @@ def main(
             base_path=tif_base_path
         )
         dm.setup()
+       
+        
         
         total_str = ""
         
+       
         for i in range(num_batches):
             
             
             for x, y in dm.train_dataloader():
+                
                 total_str += _hash(x) + _hash(y)
+              
                 break
             
             for x, y in dm.val_dataloader():
                 total_str += _hash(x) + _hash(y)
+                
                 break
+            
             for x, y in dm.test_dataloader():
                 total_str += _hash(x) + _hash(y)
+               
                 break
         print(f"datamodule-{ds_type:<14}: {_hash(total_str)}")

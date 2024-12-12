@@ -8,36 +8,6 @@ import pickle
 from tqdm import tqdm
 import shutil
 
-def read_lmdb(lmdb_path):
-    """
-    Open an LMDB file and print some of its contents.
-
-    :param lmdb_path: Path to the LMDB file
-    """
-    # Open the LMDB environment in read-only mode
-    env = lmdb.open(lmdb_path, readonly=True, lock=False)
-    
-    with env.begin(write=False) as txn:
-        # Get the first key
-        cursor = txn.cursor()
-        for key, value in cursor:  # Iterate through the key-value pairs
-            print(f"Key: {key.decode('utf-8')}")  # Decode key to string
-            data = pickle.loads(value)  # Deserialize value using pickle
-            
-            # Extract metadata and data for demonstration
-            metadata = data.get("metadata", {})
-            image_data = data.get("data", None)  # This is the raster data
-            
-            print("Metadata:", metadata)
-            print("Image data shape:", image_data.shape if image_data is not None else "No data")
-            
-            # Stop after printing the first entry
-            
-    
-    # Close the environment
-    env.close()
-
-
 def delete_directory(output_lmdb_path):
   if os.path.exists(output_lmdb_path):
      if os.path.isdir(output_lmdb_path):
@@ -100,10 +70,10 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
 
         # Combine all files in this class
         all_files = train_files + validation_files + test_files
-        
+        dictonary = {"B01":'', "B02":'', "B03":'', "B04":'', "B05":'', "B06":'', "B07":'', "B08":'', "B09":'', "B10":'', "B11":'', "B12":'', "B8A":''}
         with env.begin(write=True) as txn:
             # Process each file and store it in LMDB
-            for file in tqdm(all_files, desc=f"Processing {class_folder}", unit="file"):
+            for file in tqdm(all_files, desc=f"Processing {class_folder}", unit="file", disable=True):
                 with rasterio.open(file) as src:
                     data = src.read()
                     metadata_info = {
@@ -111,10 +81,15 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
                         "class": class_folder,
                         "split": "train" if file in train_files else ("validation" if file in validation_files else "test"),
                     }
+                    counter = 0
+                    for band in dictonary.keys():
+                        dictonary[band] = data[counter]
+                        counter += 1
 
                 # Serialize and store in LMDB
+
                 key = file.name.encode('utf-8')
-                value = pickle.dumps({"data": data})
+                value = pickle.dumps(dictonary)
                 txn.put(key, value)
                 
                 # Append metadata for parquet

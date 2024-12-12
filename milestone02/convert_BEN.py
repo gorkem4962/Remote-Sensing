@@ -3,27 +3,12 @@ import lmdb
 import pandas as pd
 import rasterio
 from tqdm import tqdm
-import re
 import pickle
 import shutil
 from pathlib import Path
 import numpy as np
 
 # expected resolutions for the BigEarthNet dataset
-expected_resolutions = {
-    'B01': 20,
-    'B02': 120,
-    'B03': 120,
-    'B04': 120,
-    'B05': 60,
-    'B06': 60,
-    'B07': 60,
-    'B08': 120,
-    'B8A': 60,
-    'B09': 20,
-    'B11': 60,
-    'B12': 60
-}
 
 
 
