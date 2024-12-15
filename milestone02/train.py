@@ -10,7 +10,10 @@ from torch.optim import Adam
 
 from data_BEN import BENDataModule
 from data_EuroSAT import EuroSATDataModule
-
+### Additional Imports
+import torch
+import numpy as np
+import random
 
 class APP4RSTask2SimpleCNN(nn.Module):
     def __init__(self, input_shape: tuple, output_dim: int):
@@ -101,13 +104,18 @@ def main(
     """
     # TODO: This code is not deterministic. There are multiple sources of randomness that need to be fixed.
     #       Fix the sources of randomness to make the training deterministic.
+    SEED = 42
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    random.seed(SEED)
+    
     logging.getLogger("lightning.pytorch.utilities.rank_zero").setLevel(logging.WARNING)  # suppress some prints
     dm_kwargs = {
         "lmdb_path": lmdb_path,
         "metadata_parquet_path": metadata_parquet_path,
         "ds_type": "indexable_lmdb",
         "batch_size": 32,
-        "num_workers": 4,
+        "num_workers": 0, 
         "bandorder": ["B02", "B03", "B04", "B08"]
     }
 
@@ -117,18 +125,21 @@ def main(
         dm = EuroSATDataModule(**dm_kwargs)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
-
+    
     network = APP4RSTask2SimpleCNN(input_shape=(len(dm_kwargs["bandorder"]), 120, 120),
                                    output_dim=19 if dataset == "BEN" else 10)
+    
     model = APP4RSTask2LightningModule(datamodule=dm, network=network, task="mlc" if dataset == "BEN" else "slc")
-
+    
     logger = CSVLogger(
         save_dir="logs/",
         name="lightning_logs",
     )
-
+    
     trainer = Trainer(max_epochs=2, logger=logger, enable_progress_bar=False, enable_model_summary=False,
                       limit_train_batches=100, limit_val_batches=32)
+    # error is here 
     trainer.fit(model, dm)
+    
     trainer.test(model, datamodule=dm)
     return model

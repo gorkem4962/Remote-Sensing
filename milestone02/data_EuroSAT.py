@@ -39,8 +39,8 @@ EUROSAT_CLASSES = [
 ]
 EUROSAT_CLASSES.sort()
 
-EUROSAT_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B09", "B10", "B11", "B12", "B8A"]
-
+EUROSAT_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08","B8A", "B09", "B10", "B11", "B12"]
+# just modified eursat_bands, such that it fits with the argument banddorder of main function 
 
 class EuroSATIndexableLMDBDataset(Dataset):
     def __init__(self, lmdb_path: str, metadata_parquet_path: str, bandorder: List, split=None, transform=None):
@@ -68,7 +68,7 @@ class EuroSATIndexableLMDBDataset(Dataset):
             self.metadata = self.metadata[self.metadata['split'] == self.split]
         
         # Open the LMDB environment
-        self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False)
+        self.env = None
       
 
     def __len__(self):
@@ -84,7 +84,8 @@ class EuroSATIndexableLMDBDataset(Dataset):
         """
        
         
-        
+        if self.env is None:
+            self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False)
         
           # Assuming 'label' contains the class index (adjust accordingly)
 
@@ -112,7 +113,8 @@ class EuroSATIndexableLMDBDataset(Dataset):
             
             for band in self.bandorder:
                 
-                band_image = dictonary[band]  # Assuming `band` retrieves the correct image data
+                band_image = dictonary[band]
+                  # Assuming `band` retrieves the correct image data
                 label = sample['class']
                 assert isinstance(label, str), f"Unexpected label format: {label}"
 
@@ -131,11 +133,18 @@ class EuroSATIndexableLMDBDataset(Dataset):
         if self.transform:
          image = self.transform(image)
         
-        # Convert labels to indices
-        labels_indices = [EUROSAT_CLASSES.index(arr) for arr in label_list]
-        labels = torch.tensor(labels_indices)
+        flattened_label_list = [sublist for sublist in label_list ]
+        label_indices = [EUROSAT_CLASSES.index(label) for label in flattened_label_list]
+        label_indices_tensor = torch.tensor(label_indices)
 
-        return image, labels
+        # Step 4: Create a tensor for all possible indices (for membership checking)
+        all_indices = torch.tensor(range(len(EUROSAT_CLASSES)))
+
+        # Step 5: Use torch.isin for membership checking (return 1 for present, 0 for not present)
+        labels_indices = torch.isin(all_indices, label_indices_tensor).int()
+        labels_indices = labels_indices.float()
+
+        return image, labels_indices
 
 
 
@@ -240,12 +249,20 @@ class EuroSATIndexableTifDataset(Dataset):
 
     # Concatenate all bands along the channel dimension (C, H, W)
         image = torch.stack(band_tensors, dim=0)
-  
+        if self.transform:
+         image = self.transform(image)
+        flattened_label_list = [sublist for sublist in label_list]
+        label_indices = [EUROSAT_CLASSES.index(label) for label in flattened_label_list]
+        label_indices_tensor = torch.tensor(label_indices)
+
+        # Step 4: Create a tensor for all possible indices (for membership checking)
+        all_indices = torch.tensor(range(len(EUROSAT_CLASSES)))
+
+        # Step 5: Use torch.isin for membership checking (return 1 for present, 0 for not present)
+        labels_indices = torch.isin(all_indices, label_indices_tensor).int()
+        labels_indices = labels_indices.float()
         
-        labels_indices =  [EUROSAT_CLASSES.index(arr) for arr in label_list] # only one class for one patch
-        labels = torch.tensor(labels_indices)
-        
-        return image,labels
+        return image,labels_indices
 
 
 class EuroSATIterableLMDBDataset(IterableDataset):
@@ -276,7 +293,7 @@ class EuroSATIterableLMDBDataset(IterableDataset):
        
         
         # Open the LMDB environment
-        self.env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+        self.env = None
         self.current_index = 0
 
     def __len__(self):
@@ -290,7 +307,8 @@ class EuroSATIterableLMDBDataset(IterableDataset):
         :return: an iterator over the dataset, e.g. via `yield` where each item is a (patch, label) tuple where patch is
             a tensor of shape (C, H, W) and label is a tensor of shape (N,)
         """
-        
+        if self.env is None:
+            self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
         
         while self.current_index < len(self.metadata):
             idx = self.current_index
@@ -324,15 +342,24 @@ class EuroSATIterableLMDBDataset(IterableDataset):
 
             # Concatenate all bands along the channel dimension (C, H, W)
             image = torch.cat(band_tensors, dim=0)
-            
+            if self.transform:
+              image = self.transform(image)
             # Convert labels to indices
-            labels_indices = [EUROSAT_CLASSES.index(arr) for arr in label_list ]
-            labels = torch.tensor(labels_indices)
+            flattened_label_list = [sublist for sublist in label_list]
+            label_indices = [EUROSAT_CLASSES.index(label) for label in flattened_label_list]
+            label_indices_tensor = torch.tensor(label_indices)
+
+            # Step 4: Create a tensor for all possible indices (for membership checking)
+            all_indices = torch.tensor(range(len(EUROSAT_CLASSES)))
+
+            # Step 5: Use torch.isin for membership checking (return 1 for present, 0 for not present)
+            labels_indices = torch.isin(all_indices, label_indices_tensor).int()
+            labels_indices = labels_indices.float()
 
             if self.with_keys:
-                yield patch_id, image, labels
+                yield patch_id, image, labels_indices
             else:
-                yield image, labels
+                yield image, labels_indices
     
         
 
@@ -442,6 +469,7 @@ class EuroSATDataModule(LightningDataModule):
             self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0
             # Use the custom sampler
         ) 
 
@@ -451,7 +479,8 @@ class EuroSATDataModule(LightningDataModule):
             self.val_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False  # Validation data should not be shuffled
+            shuffle=False,
+            persistent_workers=self.num_workers > 0 # Validation data should not be shuffled
         )
 
     def test_dataloader(self):
@@ -460,7 +489,8 @@ class EuroSATDataModule(LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False  # Validation data should not be shuffled
+            shuffle=False ,
+            persistent_workers=self.num_workers > 0 # Validation data should not be shuffled
         )
 
 

@@ -35,12 +35,12 @@ os.environ['RANDOM_SEED'] = "42"
 # ================================================================================================================== #
 
 if __name__ == '__main__':
-    test_conversion_ben = False
+    test_conversion_ben = True
     test_conversion_eurosat = True
-    test_data_ben = False
-    test_data_eurosat = False
-    test_training_ben = False
-    test_training_eurosat = False
+    test_data_ben = True
+    test_data_eurosat = True
+    test_training_ben = True
+    test_training_eurosat = True
     # You may run your code here
 
     # ============================================== Don't change this ============================================== #

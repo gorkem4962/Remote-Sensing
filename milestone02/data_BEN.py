@@ -53,8 +53,8 @@ BEN_CLASSES = [
 BEN_CLASSES.sort()
 assert len(BEN_CLASSES) == 19, f"Expected 19 classes, got {len(BEN_CLASSES)}"
 
-BEN_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B09", "B11", "B12", "B8A"]
-
+BEN_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08","B8A", "B09", "B11", "B12"]
+ #just modified BEN_bands, such that it fits with the argument bandorder of main function 
 
 class BENIndexableLMDBDataset(Dataset):
     def __init__(self, lmdb_path: str, metadata_parquet_path: str, bandorder: List, split=None, transform=None):
@@ -83,7 +83,7 @@ class BENIndexableLMDBDataset(Dataset):
 
 
         # Open LMDB environment
-        self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+        self.env = None
        
         # Map band names to indices
        
@@ -104,11 +104,10 @@ class BENIndexableLMDBDataset(Dataset):
         :param idx: Index of the item in the dataset.
         :return: (patch, label) tuple where patch is a tensor of shape (C, H, W) and label is a tensor of shape (N,).
         """
-        
+        if self.env is None:
+            self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
        
-        if idx >= len(self.metadata) or idx < 0:
-         raise IndexError(f"Index {idx} is out of bounds for metadata of size {len(metadata)}")
-
+        
         sample = self.metadata.iloc[idx]
         band_tensors = []  # To hold transformed tensors of each band
         label_list = []
@@ -145,14 +144,20 @@ class BENIndexableLMDBDataset(Dataset):
 
         # Concatenate all bands along the channel dimension (C, H, W)
         image = torch.cat(band_tensors, dim=0)
-        
-        # Convert labels to indices
+        if self.transform:
+         image = self.transform(image)  # Apply self.transform to the concatenated image tensor
 
-        labels_indices = [BEN_CLASSES.index(item) for arr in label_list for item in arr]
-        
-        labels = torch.tensor(labels_indices)
+        flattened_label_list = [label for sublist in label_list for label in sublist]
+        label_indices = [BEN_CLASSES.index(label) for label in flattened_label_list]
+        label_indices_tensor = torch.tensor(label_indices)
 
-        return image, labels
+        # Step 4: Create a tensor for all possible indices (for membership checking)
+        all_indices = torch.tensor(range(len(BEN_CLASSES)))
+
+        # Step 5: Use torch.isin for membership checking (return 1 for present, 0 for not present)
+        labels_indices = torch.isin(all_indices, label_indices_tensor).int()
+        labels_indices = labels_indices.float()
+        return image, labels_indices
 
         
 
@@ -187,7 +192,7 @@ class BENIndexableTifDataset(Dataset):
         # Reset the indices
         self.metadata_for_split.reset_index(drop=True, inplace=True)
 
-# Verify the new indices
+
 
 
     
@@ -266,13 +271,26 @@ class BENIndexableTifDataset(Dataset):
 
     # Concatenate all bands along the channel dimension (C, H, W)
         image = torch.cat(band_tensors, dim=0)
+        if self.transform:
+         image = self.transform(image)  
         
-        labels_indices =  [BEN_CLASSES.index(item) for arr in label_list for item in arr]
-        labels = torch.tensor(labels_indices)
+        flattened_label_list = [label for sublist in label_list for label in sublist]
+        label_indices = [BEN_CLASSES.index(label) for label in flattened_label_list]
+        label_indices_tensor = torch.tensor(label_indices)
+
+        # Step 4: Create a tensor for all possible indices (for membership checking)
+        all_indices = torch.tensor(range(len(BEN_CLASSES)))
+
+        # Step 5: Use torch.isin for membership checking (return 1 for present, 0 for not present)
+        labels_indices = torch.isin(all_indices, label_indices_tensor).int()
+        labels_indices = labels_indices.float()
+
+        
+        
     # Retrieve label from metadata
      
 
-        return image, labels
+        return image, labels_indices
       
 
               
@@ -307,7 +325,7 @@ class BENIterableLMDBDataset(IterableDataset):
        
         
         # Open the LMDB environment
-        self.env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+        self.env = None
         self.current_index = 0
 
     def __len__(self):
@@ -324,7 +342,8 @@ class BENIterableLMDBDataset(IterableDataset):
         :return: an iterator over the dataset, yielding (patch, label) tuples where patch is a tensor of shape (C, H, W)
                 and label is a tensor of shape (N,). If `self.with_keys` is True, yields (sample_id, patch, label).
         """
-        
+        if self.env is None:
+            self.env = lmdb.open(self.lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
         
         while self.current_index < len(self.metadata):
             idx = self.current_index
@@ -365,15 +384,24 @@ class BENIterableLMDBDataset(IterableDataset):
 
             # Concatenate all bands along the channel dimension (C, H, W)
             image = torch.cat(band_tensors, dim=0)
-            
+            if self.transform:
+             image = self.transform(image)  
             # Convert labels to indices
-            labels_indices = [BEN_CLASSES.index(item) for arr in label_list for item in arr]
-            labels = torch.tensor(labels_indices)
+            flattened_label_list = [label for sublist in label_list for label in sublist]
+            label_indices = [BEN_CLASSES.index(label) for label in flattened_label_list]
+            label_indices_tensor = torch.tensor(label_indices)
 
+            # Step 4: Create a tensor for all possible indices (for membership checking)
+            all_indices = torch.tensor(range(len(BEN_CLASSES)))
+
+            # Step 5: Use torch.isin for membership checking (return 1 for present, 0 for not present)
+            labels_indices = torch.isin(all_indices, label_indices_tensor).int()
+            labels_indices = labels_indices.float()
+            
             if self.with_keys:
-                yield patch_id, image, labels
+                yield patch_id, image, labels_indices
             else:
-                yield image, labels
+                yield image, labels_indices
     
 
 
@@ -388,6 +416,7 @@ class BENDataModule(LightningDataModule):
             base_path: Optional[str] = None,
             lmdb_path: Optional[str] = None,
             metadata_parquet_path: Optional[str] = None,
+            
     ):
         """
         DataModule for the BigEarthNet dataset.
@@ -410,7 +439,7 @@ class BENDataModule(LightningDataModule):
         self.base_path = base_path
         self.lmdb_path = lmdb_path
         self.metadata_parquet_path = metadata_parquet_path
-
+       
         # Initialize the dataset objects for train, validation, and test (None to be initialized later)
         self.train_dataset = None
         self.val_dataset = None
@@ -483,13 +512,11 @@ class BENDataModule(LightningDataModule):
     def train_dataloader(self):
                 
     # Create a sampler that respects the dataset length
-        
-        
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            # Use the custom sampler
+            persistent_workers=self.num_workers > 0  # Only True if num_workers > 0
         )
     def val_dataloader(self):
         # TODO: Return a DataLoader for the validation dataset with the correct parameters for training neural networks.
@@ -497,7 +524,9 @@ class BENDataModule(LightningDataModule):
             self.val_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False  # Validation data should not be shuffled
+            shuffle=False ,
+            persistent_workers=self.num_workers > 0
+             # Validation data should not be shuffled
         )
 
     def test_dataloader(self):
@@ -506,7 +535,9 @@ class BENDataModule(LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False  # Validation data should not be shuffled
+            shuffle=False,
+            persistent_workers=self.num_workers>0
+                # Validation data should not be shuffled
         )
 
 
@@ -577,11 +608,12 @@ def main(
             print(f"{split}-{ds_type}: {_hash(total_str)} @ {time.time() - t0:.2f}s")
     
     print()
-   
     for ds_type in ['indexable_lmdb', 'indexable_tif', 'iterable_lmdb']:
         # seed the dataloaders for reproducibility
         
         torch.manual_seed(seed)
+        
+        
         dm = BENDataModule(
             batch_size=1,
             num_workers=0,
@@ -593,14 +625,15 @@ def main(
         )
         dm.setup()
        
+
+        
         
         
         total_str = ""
         
-       
         for i in range(num_batches):
             
-            
+           
             for x, y in dm.train_dataloader():
                 
                 total_str += _hash(x) + _hash(y)
@@ -611,9 +644,12 @@ def main(
                 total_str += _hash(x) + _hash(y)
                 
                 break
-            
+           
             for x, y in dm.test_dataloader():
                 total_str += _hash(x) + _hash(y)
                
                 break
+           
+
+        
         print(f"datamodule-{ds_type:<14}: {_hash(total_str)}")

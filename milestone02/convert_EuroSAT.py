@@ -12,7 +12,7 @@ def delete_directory(output_lmdb_path):
   if os.path.exists(output_lmdb_path):
      if os.path.isdir(output_lmdb_path):
         shutil.rmtree(output_lmdb_path)  # Remove directory and all its contents
-        print(f"Deleted directory: {output_lmdb_path}")
+       
 
 def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
     """
@@ -70,7 +70,7 @@ def main(input_data_path: str, output_lmdb_path: str, output_parquet_path: str):
 
         # Combine all files in this class
         all_files = train_files + validation_files + test_files
-        dictonary = {"B01":'', "B02":'', "B03":'', "B04":'', "B05":'', "B06":'', "B07":'', "B08":'', "B09":'', "B10":'', "B11":'', "B12":'', "B8A":''}
+        dictonary = {"B01":'', "B02":'', "B03":'', "B04":'', "B05":'', "B06":'', "B07":'', "B08":'',"B8A":'', "B09":'', "B10":'', "B11":'', "B12":''}
         with env.begin(write=True) as txn:
             # Process each file and store it in LMDB
             for file in tqdm(all_files, desc=f"Processing {class_folder}", unit="file", disable=True):

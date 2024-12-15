@@ -8,40 +8,6 @@ import shutil
 from pathlib import Path
 import numpy as np
 
-# expected resolutions for the BigEarthNet dataset
-
-
-
-def open_and_read_lmdb(lmdb_path):
-    # Open the LMDB environment in read-only mode
-    env = lmdb.open(lmdb_path, readonly=True)
-
-    # Start a transaction to access data
-    with env.begin() as txn:
-        # Create a cursor to iterate over key-value pairs
-        cursor = txn.cursor()
-        
-        # Iterate over all key-value pairs in the LMDB
-        for key, value in cursor:
-            # Decode key if it is in bytes
-            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
-            
-            # Unpickle the value to get the original data and metadata
-            try:
-                value_data = pickle.loads(value)
-                data = value_data.get('data')  # This will be the NumPy array (image data)
-                metadata = value_data.get('metadata')  # This will be the metadata dictionary
-
-                # Print key and part of the data and metadata
-                print(f"Key: {key_str}")
-                 # This can be large, print summary or specific fields
-                print(f"Data (NumPy array shape): {data.shape if isinstance(data, np.ndarray) else 'N/A'}")
-
-            except Exception as e:
-                print(f"Failed to unpickle value for key {key_str}: {e}")
-            
-    # Close the LMDB environment
-    env.close()
 
 
 
@@ -52,7 +18,7 @@ def delete_directory(output_lmdb_path):
   if os.path.exists(output_lmdb_path):
      if os.path.isdir(output_lmdb_path):
         shutil.rmtree(output_lmdb_path)  # Remove directory and all its contents
-        print(f"Deleted directory: {output_lmdb_path}")
+       
 
 def create_lmdb(input_data_path, output_lmdb_path, output_parquet_path):
     """
